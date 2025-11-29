@@ -108,7 +108,7 @@ async def aoc(interaction: discord.Interaction, command: str):
             await interaction.response.send_message("That username is not valid. Feel free to manually look for it here: https://adventofcode.com/2025/leaderboard/private/view/5160767", ephemeral=True)
 
     else:
-        await interaction.response.send_message(f"Your command `{action}` is not valid. Try **join**, **leave**, **stats**, or **leaderboard**.", ephemeral=True)
+        await interaction.response.send_message(f"Your command `{action}` is not valid. Try `join`, `leave`, `stats [NAME]`, or `leaderboard`.", ephemeral=True)
 
 # !test_daily_leaderboard
 @bot.command()
