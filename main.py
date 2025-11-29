@@ -1,8 +1,17 @@
+##########################################
+# Advent of code bot
+# 29/11/2025
+##########################################
 import discord
+from discord import app_commands
 from discord.ext import commands
 import logging
 from dotenv import load_dotenv
+import requests
 import os
+from discord.ext import tasks
+import datetime
+from zoneinfo import ZoneInfo
 
 load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
@@ -14,74 +23,206 @@ intents.members = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-secret_role = "Gamer"
+AOC_ROLE = "aoc-2025"
+AOC_2025 = "aoc-2025"
+AOC_LEADERBOARD = "aoc-leaderboard"
+AOC_DISCUSSION = "aoc-discussion"
+AOC_CHANNELS = (AOC_2025, AOC_LEADERBOARD, AOC_DISCUSSION)
+LEADERBOARD_ID = 5160767
 
 @bot.event
 async def on_ready():
-    print(f"We are ready to go in, {bot.user.name}")
+    print(f"Bot is ready {bot.user.name}")
+    daily_leaderboard.start()
+    daily_problem_release.start()
 
-@bot.event
-async def on_member_join(member):
-    await member.send(f"Welcome to the server {member.name}")
-
-@bot.event
-async def on_message(message):
-    # Don't reply to your own message
-    if message.author == bot.user:
-        return
-    if "xxx" in message.content.lower():
-        await message.delete()
-        await message.channel.send(f"{message.author.mention} don't use that word!")
-
-    await bot.process_commands(message)
-
+########################################## Functionality ##########################################
 # !hello
 @bot.command()
 async def hello(ctx):
+    if ctx.channel.name not in AOC_CHANNELS:
+        return
     await ctx.send(f"Hello {ctx.author.mention}!")
 
+
+# !clearglobal
 @bot.command()
-async def assign(ctx):
-    role = discord.utils.get(ctx.guild.roles, name=secret_role)
-    if role:
-        await ctx.author.add_roles(role)
-        await ctx.send(f"{ctx.author.mention} is now assigned to {secret_role}")
+async def clearglobal(ctx):
+    bot.tree.clear_commands(guild=None)
+    await bot.tree.sync()
+    await ctx.send("Removed global one")
+
+# !sync
+@bot.command()
+async def sync(ctx):
+    ctx.bot.tree.copy_global_to(guild=ctx.guild)
+    synced = await ctx.bot.tree.sync(guild=ctx.guild)
+    await ctx.send(f"Synced {len(synced)} command(s) to this server yay")
+
+@bot.tree.command(name="aoc", description="Join, leave or see stats for AOC")
+@app_commands.describe(command="Commands: join, leave, stats [NAME], leaderboard")
+async def aoc(interaction: discord.Interaction, command: str):
+    if interaction.channel.name not in AOC_CHANNELS:
+        await interaction.response.send_message(
+            f"You can only run /aoc commands from `#aoc-2025`, `#aoc-leaderboard` and `#aoc-discussion`",ephemeral=True)
+        return
+
+    action = command.lower().strip()
+
+    if action == "join":
+        role = discord.utils.get(interaction.guild.roles, name=AOC_ROLE)
+        if role:
+            if role in interaction.user.roles:
+                await interaction.response.send_message("You already joined AOC", ephemeral=True)
+            else:
+                await interaction.user.add_roles(role)
+
+                msg = f"""
+                    Welcome to Advent of Code 2025 {interaction.user.mention}\nGet started by making a free account here: https://adventofcode.com/2025/auth/login\nJoin our leaderboard using code `5160767-90e44d7b` here: https://adventofcode.com/2025/leaderboard/private\nYou will be pinged with a daily reminder when new problems come out
+                """
+
+                await interaction.response.send_message(msg, ephemeral=True)
+                await interaction.channel.send(f"{interaction.user.mention} joined Advent of Code!")
+    elif action == "leave":
+        role = discord.utils.get(interaction.guild.roles, name=AOC_ROLE)
+        if role:
+            await interaction.user.remove_roles(role)
+            await interaction.response.send_message(f"See you {interaction.user.mention}. Rejoin AOC anytime", ephemeral=True)
+    elif action == "leaderboard":
+        try:
+            leaderboard_text = get_leaderboard_text(5)
+            await interaction.response.send_message(leaderboard_text, ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"Error fetching leaderboard: {e}", ephemeral=True)
+    elif action.startswith("stats"):
+        parts = command.split()
+
+        if len(parts) < 2:
+            await interaction.response.send_message("Please provide a username.\nExample: `stats Name`", ephemeral=True)
+
+        target_name = " ".join(parts[1:]).lower()
+        embed = get_stats_user(target_name)
+        if embed:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        else:
+            await interaction.response.send_message("That username is not valid. Feel free to manually look for it here: https://adventofcode.com/2025/leaderboard/private/view/5160767", ephemeral=True)
+
     else:
-        await ctx.send("Role doesn't exist")
+        await interaction.response.send_message(f"Your command `{action}` is not valid. Try **join**, **leave**, **stats**, or **leaderboard**.", ephemeral=True)
 
+# !test_daily_leaderboard
 @bot.command()
-async def remove(ctx):
-    role = discord.utils.get(ctx.guild.roles, name=secret_role)
-    if role:
-        await ctx.author.remove_roles(role)
-        await ctx.send(f"{ctx.author.mention} has had the {secret_role} removed")
-    else:
-        await ctx.send("Role doesn't exist")
+async def test_daily_leaderboard(ctx):
+    if ctx.channel.name not in AOC_CHANNELS:
+        return
 
+    print("Testing daily leaderboard")
+    await daily_leaderboard()
+
+SYDNEY = ZoneInfo("Australia/Sydney")
+DAILY_LEADERBOARD_TIME = datetime.time(hour=22, minute=00, tzinfo=SYDNEY)
+@tasks.loop(time=DAILY_LEADERBOARD_TIME)
+async def daily_leaderboard():
+    channel = discord.utils.get(bot.get_all_channels(), name=AOC_LEADERBOARD)
+
+    if channel:
+        role = discord.utils.get(channel.guild.roles, name=AOC_ROLE)
+        leaderboard_msg = get_leaderboard_text(5)
+        today = datetime.date.today().strftime("%A, %d %B %Y")
+
+        final_message = f"""
+            Hey {role.mention}!\n\nHere is the leaderboard for {today}\n\n{leaderboard_msg}\nView the full leaderboard here https://adventofcode.com/2025/leaderboard/private/view/5160767
+        """
+
+        await channel.send(final_message)
+
+# !test_daily_leaderboard
 @bot.command()
-@commands.has_role(secret_role)
-async def secret(ctx):
-    await ctx.send("Welcome to the club!")
+async def test_daily_problem_release(ctx):
+    if ctx.channel.name not in AOC_CHANNELS:
+        return
 
-@secret.error
-async def secret_error(ctx, error):
-    if isinstance(error, commands.MissingRole):
-        await ctx.send("You do not have permission to do that!")
+    print("Testing daily problem release")
+    await daily_problem_release()
 
-# #dm hello world
-@bot.command()
-async def dm(ctx, *, msg):
-    await ctx.author.send(f"You said {msg}")
+DAILY_PROBLEM_RELEASE_TIME = datetime.time(hour=10, minute=5, tzinfo=SYDNEY)
+@tasks.loop(time=DAILY_PROBLEM_RELEASE_TIME)
+async def daily_problem_release():
+    channel = discord.utils.get(bot.get_all_channels(), name=AOC_2025)
 
-@bot.command()
-async def reply(ctx):
-    await ctx.reply("This is a reply to your message!")
+    if channel:
+        role = discord.utils.get(channel.guild.roles, name=AOC_ROLE)
 
-@bot.command()
-async def poll(ctx, *, question):
-    embed = discord.Embed(title="New Poll", description=question)
-    poll_message = await ctx.send(embed=embed)
-    await poll_message.add_reaction("👍")
-    await poll_message.add_reaction("👎")
+        final_message = f"""
+            Hey {role.mention}!\n\nBe sure to check out today's newly released problem here: https://adventofcode.com/
+        """
+
+        await channel.send(final_message)
+
+
+########################################## Helper functions ##########################################
+def get_stats_user(target_name):
+    sorted_members = get_sorted_members()
+
+    for i, member in enumerate(sorted_members):
+        m_name = member.get("name", "")
+        if m_name and m_name.lower() == target_name:
+            rank = i + 1
+
+            embed = discord.Embed(
+                title=f"Stats for {m_name}",
+                color=discord.Color.blue()
+            )
+            embed.add_field(name="Rank", value=f"#{rank}", inline=True)
+            embed.add_field(name="Stars", value=f"{member.get('stars', 0)}", inline=True)
+            embed.add_field(name="Score", value=f"{member.get('local_score', 0)}", inline=True)
+
+            return embed
+
+    return None
+
+def get_data():
+    URL = f"https://adventofcode.com/2025/leaderboard/private/view/{LEADERBOARD_ID}.json"
+    COOKIE = os.getenv('AOC_SESSION')
+    if not COOKIE:
+        return "There was an error reading the leaderboard"
+
+    response = requests.get(URL, cookies={"session": COOKIE})
+    response.raise_for_status()
+    data = response.json()
+
+    return data
+
+def get_sorted_members():
+    data = get_data()
+    members_dictionary = data.get("members", {})
+    member_list = list(members_dictionary.values())
+
+    sorted_members = sorted(
+        member_list,
+        key=lambda x: -x.get("local_score", 0)
+    )
+
+    return sorted_members
+
+def get_leaderboard_text(n):
+    sorted_members = get_sorted_members()
+
+    leaderboard_text = "**Advent of Code Leaderboard**\n"
+    for i, member in enumerate(sorted_members[:n]):
+        i += 1
+        name = member.get("name")
+        score = member.get("local_score", -1)
+        stars = member.get("stars", -1)
+
+        if i == 1: number = "🥇"
+        elif i == 2: number = "🥈"
+        elif i == 3: number = "🥉"
+        else: number = f"{i}"
+
+        print(f"Name {name}, Score {score}, Stars: {stars}\n")
+        leaderboard_text += f"{number} - {name} - {score} score - {stars} stars\n"
+
+    return leaderboard_text
 
 bot.run(token, log_handler=handler, log_level=logging.DEBUG)
