@@ -1,5 +1,5 @@
 ##########################################
-# Advent of code bot
+# Advent of Code Bot
 # 29/11/2025
 ##########################################
 import discord
@@ -30,6 +30,7 @@ AOC_DISCUSSION = "aoc-discussion"
 AOC_CHANNELS = (AOC_2025, AOC_LEADERBOARD, AOC_DISCUSSION)
 LEADERBOARD_ID = 5160767
 
+# Purpose: Gets the bot ready, logs it so you can be sure, and starts the self timer tasks
 @bot.event
 async def on_ready():
     print(f"Bot is ready {bot.user.name}")
@@ -37,35 +38,39 @@ async def on_ready():
     daily_problem_release.start()
 
 ########################################## Functionality ##########################################
-# !hello
+# Purpose: Returns hello to the user with a mention for debugging purposes
+# To run: !hello
 @bot.command()
 async def hello(ctx):
     if ctx.channel.name not in AOC_CHANNELS:
         return
     await ctx.send(f"Hello {ctx.author.mention}!")
 
-
-# !clearglobal
+# Purpose: Clears the bot from your global account on Discord
+# To run: !clearglobal
 @bot.command()
 async def clearglobal(ctx):
     bot.tree.clear_commands(guild=None)
     await bot.tree.sync()
     await ctx.send("Removed global one")
 
-# !sync
+# Purpose: Syncs your local code with Discord server. Run everytime you make a change
+# To run: !sync
 @bot.command()
 async def sync(ctx):
     ctx.bot.tree.copy_global_to(guild=ctx.guild)
     synced = await ctx.bot.tree.sync(guild=ctx.guild)
     await ctx.send(f"Synced {len(synced)} command(s) to this server yay")
 
+# Purpose: This is the logic for the /aoc [COMMAND] part
+# To run: /aoc [COMMAND]
 @bot.tree.command(name="aoc", description="Join, leave or see stats for AOC")
 @app_commands.describe(command="Commands: join, leave, stats [NAME], leaderboard")
 async def aoc(interaction: discord.Interaction, command: str):
-    if interaction.channel.name not in AOC_CHANNELS:
-        await interaction.response.send_message(
-            f"You can only run /aoc commands from `#aoc-2025`, `#aoc-leaderboard` and `#aoc-discussion`",ephemeral=True)
-        return
+    # if interaction.channel.name not in AOC_CHANNELS:
+    #     await interaction.response.send_message(
+    #         f"You can only run /aoc commands from `#aoc-2025`, `#aoc-leaderboard` and `#aoc-discussion`",ephemeral=True)
+    #     return
 
     action = command.lower().strip()
 
@@ -110,7 +115,8 @@ async def aoc(interaction: discord.Interaction, command: str):
     else:
         await interaction.response.send_message(f"Your command `{action}` is not valid. Try `join`, `leave`, `stats [NAME]`, or `leaderboard`.", ephemeral=True)
 
-# !test_daily_leaderboard
+# Purpose: Tests the daily leaderboard so you can check it will run
+# To run: !test_daily_leaderboard
 @bot.command()
 async def test_daily_leaderboard(ctx):
     if ctx.channel.name not in AOC_CHANNELS:
@@ -119,6 +125,8 @@ async def test_daily_leaderboard(ctx):
     print("Testing daily leaderboard")
     await daily_leaderboard()
 
+# Purpose: Runs the daily leaderboard at a prescheduled time of 10pm Sydney time
+# To run: Runs automatically (assuming you have started the server)
 SYDNEY = ZoneInfo("Australia/Sydney")
 DAILY_LEADERBOARD_TIME = datetime.time(hour=22, minute=00, tzinfo=SYDNEY)
 @tasks.loop(time=DAILY_LEADERBOARD_TIME)
@@ -136,7 +144,8 @@ async def daily_leaderboard():
 
         await channel.send(final_message)
 
-# !test_daily_leaderboard
+# Purpose: Runs the daily reminder for the problem
+# To run: !test_daily_leaderboard
 @bot.command()
 async def test_daily_problem_release(ctx):
     if ctx.channel.name not in AOC_CHANNELS:
@@ -145,6 +154,9 @@ async def test_daily_problem_release(ctx):
     print("Testing daily problem release")
     await daily_problem_release()
 
+# Purpose: Mentions everyone who is in the @aoc-2025 role that a new problem is released. Typically problems are
+#          released at 10am Sydney time
+# To run: Runs automatically (assuming you have started the server)
 DAILY_PROBLEM_RELEASE_TIME = datetime.time(hour=10, minute=5, tzinfo=SYDNEY)
 @tasks.loop(time=DAILY_PROBLEM_RELEASE_TIME)
 async def daily_problem_release():
@@ -161,6 +173,8 @@ async def daily_problem_release():
 
 
 ########################################## Helper functions ##########################################
+# Purpose: Gets the stats of a specific user
+# Side effects: Returns None if no user can be found (used for error checking)
 def get_stats_user(target_name):
     sorted_members = get_sorted_members()
 
@@ -181,6 +195,7 @@ def get_stats_user(target_name):
 
     return None
 
+# Purpose: Gets data in a JSON format from the public API and cookie (stored in .env)
 def get_data():
     URL = f"https://adventofcode.com/2025/leaderboard/private/view/{LEADERBOARD_ID}.json"
     COOKIE = os.getenv('AOC_SESSION')
@@ -193,6 +208,7 @@ def get_data():
 
     return data
 
+# Purpose: Gets data then transforms it into a list for easier analysis. Then sorts it by score in descending order.
 def get_sorted_members():
     data = get_data()
     members_dictionary = data.get("members", {})
@@ -205,6 +221,8 @@ def get_sorted_members():
 
     return sorted_members
 
+# Purpose: Gets the text for the leaderboard and formats it.
+# Side effects: Will set a players score or stars to -1 if it cannot be found
 def get_leaderboard_text(n):
     sorted_members = get_sorted_members()
 
@@ -225,4 +243,5 @@ def get_leaderboard_text(n):
 
     return leaderboard_text
 
+# Purpose: This runs the actual bot
 bot.run(token, log_handler=handler, log_level=logging.DEBUG)
