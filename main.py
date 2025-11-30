@@ -35,8 +35,10 @@ LEADERBOARD_ID = 5160767
 @bot.event
 async def on_ready():
     print(f"Bot is ready {bot.user.name}")
-    daily_leaderboard.start()
-    daily_problem_release.start()
+    if not daily_leaderboard.is_running():
+        daily_leaderboard.start()
+    if not daily_problem_release.is_running():
+        daily_problem_release.start()
 
 ########################################## Functionality ##########################################
 # Purpose: Returns hello to the user with a mention for debugging purposes
@@ -124,7 +126,7 @@ async def test_daily_leaderboard(ctx):
         return
 
     print("Testing daily leaderboard")
-    await daily_leaderboard()
+    await daily_leaderboard_logic()
 
 # Purpose: Runs the daily leaderboard at a prescheduled time of 10pm Sydney time
 # To run: Runs automatically (assuming you have started the server)
@@ -132,9 +134,13 @@ SYDNEY = ZoneInfo("Australia/Sydney")
 DAILY_LEADERBOARD_TIME = datetime.time(hour=22, minute=00, tzinfo=SYDNEY)
 @tasks.loop(time=DAILY_LEADERBOARD_TIME)
 async def daily_leaderboard():
+    await daily_leaderboard_logic()
+
+async def daily_leaderboard_logic():
     channel = discord.utils.get(bot.get_all_channels(), name=AOC_LEADERBOARD)
 
     if channel:
+        print("Channel exists")
         role = discord.utils.get(channel.guild.roles, name=AOC_ROLE)
         leaderboard_msg = get_leaderboard_text(5)
         today = datetime.date.today().strftime("%A, %d %B %Y")
@@ -143,10 +149,11 @@ async def daily_leaderboard():
             Hey {role.mention}!\n\nHere is the leaderboard for {today}\n\n{leaderboard_msg}\nView the full leaderboard here https://adventofcode.com/2025/leaderboard/private/view/5160767
         """
 
+        print(f"Final message is {final_message}")
         await channel.send(final_message)
 
 # Purpose: Runs the daily reminder for the problem
-# To run: !test_daily_leaderboard
+# To run: !test_daily_problem_release
 @bot.command()
 async def test_daily_problem_release(ctx):
     if ctx.channel.name not in AOC_CHANNELS:
