@@ -90,7 +90,9 @@ async def aoc(interaction: discord.Interaction, command: str):
                 """
 
                 await interaction.response.send_message(msg, ephemeral=True)
-                await interaction.channel.send(f"{interaction.user.mention} joined Advent of Code!")
+                target_channel = discord.utils.get(interaction.guild.channels, name=AOC_2025)
+                if target_channel:
+                    await target_channel.channel.send(f"{interaction.user.mention} joined Advent of Code!")
     elif action == "leave":
         role = discord.utils.get(interaction.guild.roles, name=AOC_ROLE)
         if role:
